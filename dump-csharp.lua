@@ -477,7 +477,6 @@ local function do_dump_csharp()
             file:write("\n")
             do_dump_csharp_type(file, type)
         end
-        break
     end
 
     file:close()

@@ -2,6 +2,8 @@ local DUMP_FOLDER = "X:/dump"
 local DUMP_LOG_FILE = DUMP_FOLDER .. "/dump-csharp.log"
 local DUMP_CS_FILE = DUMP_FOLDER .. "/dump-csharp.cs"
 
+local log = io.open(DUMP_LOG_FILE, "w")
+
 local SYSTEM_NAMES = {
     ["System.Int32"] = "int",
     ["System.UInt32"] = "uint",
@@ -20,57 +22,57 @@ local SYSTEM_NAMES = {
     ["System.Void"] = "void"
 }
 
-local log = io.open(DUMP_LOG_FILE, "w")
+local TypeAttributes = CS.System.Reflection.TypeAttributes
 
 local function get_type_visibility_string(type)
-    local string = ""
-    local attributes = type.Attributes
-    local visibility = attributes & CS.System.Reflection.TypeAttributes.VisibilityMask
-    if (visibility == CS.System.Reflection.TypeAttributes.Public) then
-        string = string .. "public "
-    elseif (visibility == CS.System.Reflection.TypeAttributes.NotPublic) or
-        (visibility == CS.System.Reflection.TypeAttributes.NestedFamANDAssem) or
-        (visibility == CS.System.Reflection.TypeAttributes.NestedAssembly) then
-        string = string .. "internal "
-    elseif (visibility == CS.System.Reflection.TypeAttributes.NestedPrivate) then
-        string = string .. "private "
-    elseif (visibility == CS.System.Reflection.TypeAttributes.NestedFamily) then
-        string = string .. "protected "
-    elseif (visibility == CS.System.Reflection.TypeAttributes.NestedFamORAssem) then
-        string = string .. "internal "
+    local visibility = type.Attributes & TypeAttributes.VisibilityMask
+    if (visibility == TypeAttributes.Public) --
+    or (visibility == TypeAttributes.NestedPublic) then
+        return "public "
+    elseif (visibility == TypeAttributes.NotPublic) --
+    or (visibility == TypeAttributes.NestedFamANDAssem) --
+    or (visibility == TypeAttributes.NestedAssembly) then
+        return "internal "
+    elseif (visibility == TypeAttributes.NestedPrivate) then
+        return "private "
+    elseif (visibility == TypeAttributes.NestedFamily) then
+        return "protected "
+    elseif (visibility == TypeAttributes.NestedFamORAssem) then
+        return "internal "
+    else
+        return ""
     end
-    return string
 end
 
 local function get_type_string(type)
-    local string = get_type_visibility_string(type)
+    local out = get_type_visibility_string(type)
     local attributes = type.Attributes
-    if (attributes & CS.System.Reflection.TypeAttributes.Sealed).value__ ~= 0 and
-        (attributes & CS.System.Reflection.TypeAttributes.Abstract).value__ ~= 0 then
-        string = string .. "static "
-    elseif (attributes & CS.System.Reflection.TypeAttributes.Abstract).value__ ~= 0 and
-        (attributes & CS.System.Reflection.TypeAttributes.Interface).value__ == 0 then
-        string = string .. "abstract "
-    elseif (attributes & CS.System.Reflection.TypeAttributes.Sealed).value__ ~= 0 and
-        (not type.IsEnum or not type.IsValueType) then
-        string = string .. "sealed "
+    if (attributes & TypeAttributes.Abstract).value__ ~= 0 --
+    and (attributes & TypeAttributes.Sealed).value__ ~= 0 then
+        out = out .. "static "
+    elseif (attributes & TypeAttributes.Abstract).value__ ~= 0 --
+    and (attributes & TypeAttributes.Interface).value__ == 0 then
+        out = out .. "abstract "
+    elseif (attributes & TypeAttributes.Sealed).value__ ~= 0 --
+    and (not type.IsEnum or not type.IsValueType) then
+        out = out .. "sealed "
     end
-    if (attributes & CS.System.Reflection.TypeAttributes.Interface).value__ ~= 0 then
-        string = string .. "interface "
+    if (attributes & TypeAttributes.Interface).value__ ~= 0 then
+        out = out .. "interface "
     elseif type.IsEnum then
-        string = string .. "enum "
+        out = out .. "enum "
     elseif type.IsValueType then
-        string = string .. "struct "
+        out = out .. "struct "
     else
-        string = string .. "class "
+        out = out .. "class "
     end
-    return string
+    return out
 end
 
 local function get_reflected_type(type)
     local name = type.Name
-    if type.ReflectedType ~= nil and not type.ReflectedType.IsGenericType then
-        -- log:write(string.format("%s %s\n", type, type.ReflectedType))
+    if type.ReflectedType ~= nil --
+    and not type.ReflectedType.IsGenericType then
         name = type.ReflectedType.Name .. "." .. name
     end
     return name
@@ -78,7 +80,13 @@ end
 
 local function get_runtime_type_name(type, alias)
     if type.IsArray then
-        return get_runtime_type_name(type:GetElementType(), alias) .. "[]"
+        local out = get_runtime_type_name(type:GetElementType(), alias)
+        out = out .. "["
+        for i = 2, type:GetArrayRank() do
+            out = out .. ","
+        end
+        out = out .. "]"
+        return out
     elseif type.IsPointer then
         return get_runtime_type_name(type:GetElementType(), alias) .. "*"
     elseif type.IsByRef then
@@ -114,80 +122,94 @@ local function get_runtime_type_name_alias(type)
     return get_runtime_type_name(type, true)
 end
 
+local FieldAttributes = CS.System.Reflection.FieldAttributes
+
+local function get_field_type_string(field)
+    local out = ""
+    local access = field.Attributes & FieldAttributes.FieldAccessMask
+    if (access == FieldAttributes.Private) then
+        out = out .. "private "
+    elseif (access == FieldAttributes.Public) then
+        out = out .. "public "
+    elseif (access == FieldAttributes.Family) then
+        out = out .. "protected "
+    elseif (access == FieldAttributes.Assembly) --
+    or (access == FieldAttributes.FamANDAssem) then
+        out = out .. "internal "
+    elseif (access == FieldAttributes.FamORAssem) then
+        out = out .. "protected internal "
+    end
+    if field.IsLiteral then
+        out = out .. "const "
+    else
+        if field.IsStatic then
+            out = out .. "static "
+        end
+        if field.IsInitOnly then
+            out = out .. "readonly "
+        end
+    end
+    return out
+end
+
+local MethodAttributes = CS.System.Reflection.MethodAttributes
+
 local function get_method_type_string(method)
-    local string = ""
+    local out = ""
     local attributes = method.Attributes
-    local access = attributes & CS.System.Reflection.MethodAttributes.MemberAccessMask
-    if (access == CS.System.Reflection.MethodAttributes.Private) then
-        string = string .. "private "
-    elseif (access == CS.System.Reflection.MethodAttributes.Public) then
-        string = string .. "public "
-    elseif (access == CS.System.Reflection.MethodAttributes.Family) then
-        string = string .. "protected "
-    elseif (access == CS.System.Reflection.MethodAttributes.Assembly) or
-        (access == CS.System.Reflection.MethodAttributes.FamANDAssem) then
-        string = string .. "internal "
-    elseif (access == CS.System.Reflection.MethodAttributes.FamORAssem) then
-        string = string .. "protected internal "
+    local access = attributes & MethodAttributes.MemberAccessMask
+    if (access == MethodAttributes.Private) then
+        out = out .. "private "
+    elseif (access == MethodAttributes.Public) then
+        out = out .. "public "
+    elseif (access == MethodAttributes.Family) then
+        out = out .. "protected "
+    elseif (access == MethodAttributes.Assembly) --
+    or (access == MethodAttributes.FamANDAssem) then
+        out = out .. "internal "
+    elseif (access == MethodAttributes.FamORAssem) then
+        out = out .. "protected internal "
     end
-    if (attributes & CS.System.Reflection.MethodAttributes.Static).value__ ~= 0 then
-        string = string .. "static "
+    if (attributes & MethodAttributes.Static).value__ ~= 0 then
+        out = out .. "static "
     end
-    if (attributes & CS.System.Reflection.MethodAttributes.Abstract).value__ ~= 0 then
-        string = string .. "abstract "
-        if (attributes & CS.System.Reflection.MethodAttributes.VtableLayoutMask) ==
-            CS.System.Reflection.MethodAttributes.ReuseSlot then
-            string = string .. "override "
+    if (attributes & MethodAttributes.Abstract).value__ ~= 0 then
+        out = out .. "abstract "
+        if (attributes & MethodAttributes.VtableLayoutMask) == MethodAttributes.ReuseSlot then
+            out = out .. "override "
         end
-    elseif (attributes & CS.System.Reflection.MethodAttributes.Final).value__ ~= 0 then
-        if (attributes & CS.System.Reflection.MethodAttributes.VtableLayoutMask) ==
-            CS.System.Reflection.MethodAttributes.ReuseSlot then
-            string = string .. "sealed override "
+    elseif (attributes & MethodAttributes.Final).value__ ~= 0 then
+        if (attributes & MethodAttributes.VtableLayoutMask) == MethodAttributes.ReuseSlot then
+            out = out .. "sealed override "
         end
-    elseif (attributes & CS.System.Reflection.MethodAttributes.Virtual).value__ ~= 0 then
-        if (attributes & CS.System.Reflection.MethodAttributes.VtableLayoutMask) ==
-            CS.System.Reflection.MethodAttributes.NewSlot then
-            string = string .. "virtual "
+    elseif (attributes & MethodAttributes.Virtual).value__ ~= 0 then
+        if (attributes & MethodAttributes.VtableLayoutMask) == MethodAttributes.NewSlot then
+            out = out .. "virtual "
         else
-            string = string .. "override "
+            out = out .. "override "
         end
     end
-    if (attributes & CS.System.Reflection.MethodAttributes.PinvokeImpl).value__ ~= 0 then
-        string = string .. "extern "
+    if (attributes & MethodAttributes.PinvokeImpl).value__ ~= 0 then
+        out = out .. "extern "
     end
-    return string
+    return out
 end
 
 local function do_dump_csharp_field(file, field)
-    local attributes = field.Attributes
-    local access = attributes & CS.System.Reflection.FieldAttributes.FieldAccessMask
-    if (access == CS.System.Reflection.FieldAttributes.Private) then
-        file:write("private ")
-    elseif (access == CS.System.Reflection.FieldAttributes.Public) then
-        file:write("public ")
-    elseif (access == CS.System.Reflection.FieldAttributes.Family) then
-        file:write("protected ")
-    elseif (access == CS.System.Reflection.FieldAttributes.Assembly) or
-        (access == CS.System.Reflection.FieldAttributes.FamANDAssem) then
-        file:write("internal ")
-    elseif (access == CS.System.Reflection.FieldAttributes.FamORAssem) then
-        file:write("protected internal ")
-    end
+    file:write(get_field_type_string(field))
+    file:write(get_runtime_type_name_alias(field.FieldType) .. " ")
+    file:write(field.Name)
     if field.IsLiteral then
-        file:write("const ")
-    end
-    if field.IsStatic then
-        file:write("static ")
-    end
-    if field.IsInitOnly then
-        file:write("readonly ")
-    end
-    file:write(get_runtime_type_name_alias(field.FieldType) .. " " .. field.Name)
-    if field.IsLiteral then
-        if field.FieldType.Namespace == "System" and field.FieldType.Name == "String" then
-            file:write(string.format(" = \"%s\";", field:GetRawConstantValue()))
+        local value = field:GetRawConstantValue()
+        if field.FieldType.Namespace == "System" --
+        and field.FieldType.Name == "String" then
+            -- TODO: fix utf-8 encoding
+            file:write(string.format(" = \"%s\";", value))
+        elseif field.FieldType.Namespace == "System" --
+        and field.FieldType.Name == "Char" then
+            file:write(string.format(" = '\\x%X';", value))
         else
-            file:write(string.format(" = %s;", field:GetRawConstantValue()))
+            file:write(string.format(" = %s;", value))
         end
     else
         local value = field:GetFieldOffset()
@@ -221,7 +243,8 @@ local function do_dump_csharp_property(file, property)
     else
         file:write(get_type_visibility_string(property.PropertyType))
     end
-    file:write(get_runtime_type_name_alias(property.PropertyType) .. " " .. property.Name .. " { ")
+    file:write(get_runtime_type_name_alias(property.PropertyType) .. " ")
+    file:write(property.Name .. " { ")
     if property.CanRead then
         file:write("get; ")
     end
@@ -237,7 +260,8 @@ local function do_dump_csharp_method(file, type, method, is_ctor)
         file:write("void " .. method.Name)
     else
         file:write(get_method_type_string(method))
-        file:write(get_runtime_type_name_alias(method.ReturnType) .. " " .. method.Name)
+        file:write(get_runtime_type_name_alias(method.ReturnType) .. " ")
+        file:write(method.Name)
         local arguments = method:GetGenericArguments()
         if arguments.Length > 0 then
             file:write("<")
@@ -269,23 +293,33 @@ local function do_dump_csharp_method(file, type, method, is_ctor)
             else
                 name = "ref " .. name
             end
+        else
+            if parameter.IsIn then
+                name = "[In] " .. name
+            elseif parameter.IsOut then
+                name = "[Out] " .. name
+            end
         end
         file:write(name .. " " .. parameter.Name)
         local status, err = pcall(function()
             if parameter.IsOptional then
+                local value = parameter.DefaultValue
                 if parameter.ParameterType.IsEnum then
-                    if parameter.DefaultValue == nil then
-                        file:write(" = 0")
-                    elseif parameter.DefaultValue.value__ == nil then
+                    if value.value__ == nil then
                         file:write(" = 0")
                     else
-                        file:write(string.format(" = %d", parameter.DefaultValue.value__))
+                        file:write(string.format(" = %d", value.value__))
                     end
                 else
-                    if parameter.ParameterType.Namespace == "System" and parameter.ParameterType.Name == "String" then
-                        file:write(string.format(" = \"%s\"", parameter.DefaultValue))
+                    if parameter.ParameterType.Namespace == "System" --
+                    and parameter.ParameterType.Name == "String" then
+                        -- TODO: fix utf-8 encoding
+                        file:write(string.format(" = \"%s\";", value))
+                    elseif parameter.ParameterType.Namespace == "System" --
+                    and parameter.ParameterType.Name == "Char" then
+                        file:write(string.format(" = '\\x%X';", value))
                     else
-                        file:write(string.format(" = %s", parameter.DefaultValue))
+                        file:write(string.format(" = %s;", value))
                     end
                 end
             end
@@ -295,9 +329,23 @@ local function do_dump_csharp_method(file, type, method, is_ctor)
         end
     end
     file:write(") { }\n")
+    if not is_ctor then
+        local generic_method = method:GetGenericMethodDefinition_impl()
+        if generic_method ~= nil then
+            file:write("\t/* GenericMethodDefinition :\n")
+            file:write("\t |\n")
+            file:write("\t */\n")
+        end
+    end
 end
 
+local flags = CS.System.Reflection.BindingFlags.Instance | --
+CS.System.Reflection.BindingFlags.Static | --
+CS.System.Reflection.BindingFlags.Public | --
+CS.System.Reflection.BindingFlags.NonPublic
+
 local function do_dump_csharp_type(file, type)
+    file:write(string.format("// Module: %s\n", type.Module.name))
     local namespace = type.Namespace
     if namespace == nil then
         file:write("// Namespace:\n")
@@ -305,12 +353,15 @@ local function do_dump_csharp_type(file, type)
         file:write(string.format("// Namespace: %s\n", namespace))
     end
 
+    if (type.Attributes & TypeAttributes.Serializable).value__ ~= 0 then
+        file:write("[Serializable]\n")
+    end
+
     file:write(get_type_string(type) .. get_runtime_type_name(type, false))
     local once = false
     local base_type = type.BaseType
     if base_type ~= nil then
         local name = get_runtime_type_name_alias(base_type)
-        -- log:write(string.format("%s %s\n", type, name))
         if base_type.Namespace == "System" then
             if name ~= "object" and name ~= "ValueType" and name ~= "Enum" then
                 once = true
@@ -335,9 +386,6 @@ local function do_dump_csharp_type(file, type)
     end
 
     file:write("\n{")
-
-    local flags = CS.System.Reflection.BindingFlags.Instance | CS.System.Reflection.BindingFlags.Static |
-                      CS.System.Reflection.BindingFlags.Public | CS.System.Reflection.BindingFlags.NonPublic
 
     local fields = type:GetFields(flags)
     if fields.Length > 0 then
@@ -422,13 +470,14 @@ local function do_dump_csharp()
     for i = 0, assemblies.Length - 1 do
         local assembly = assemblies[i]
         local types = assembly:GetTypes()
-        log:write(string.format("dumping types in assembly %d: %s, total: %d\n", i, assembly:GetSimpleName(),
-            types.Length))
+        log:write(string.format("dumping types in assembly %d: %s, total: %d\n", --
+        i, assembly:GetSimpleName(), types.Length))
         for j = 0, types.Length - 1 do
             local type = types[j]
             file:write("\n")
             do_dump_csharp_type(file, type)
         end
+        break
     end
 
     file:close()

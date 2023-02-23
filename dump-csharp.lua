@@ -38,7 +38,7 @@ local function get_type_visibility_string(type)
     elseif (visibility == TypeAttributes.NestedFamily) then
         return "protected "
     elseif (visibility == TypeAttributes.NestedFamORAssem) then
-        return "internal "
+        return "protected internal "
     else
         return ""
     end
@@ -73,7 +73,7 @@ local function get_reflected_type(type)
     local name = type.Name
     if type.ReflectedType ~= nil --
     and not type.ReflectedType.IsGenericType then
-        name = type.ReflectedType.Name .. "." .. name
+        name = get_reflected_type(type.ReflectedType) .. "." .. name
     end
     return name
 end
@@ -109,7 +109,7 @@ local function get_runtime_type_name(type, alias)
         return name
     else
         if alias and type.Namespace == "System" then
-            local name = SYSTEM_NAMES[type.Namespace .. "." .. type.Name]
+            local name = SYSTEM_NAMES[type.FullName]
             if name ~= nil then
                 return name
             end
@@ -201,12 +201,10 @@ local function do_dump_csharp_field(file, field)
     file:write(field.Name)
     if field.IsLiteral then
         local value = field:GetRawConstantValue()
-        if field.FieldType.Namespace == "System" --
-        and field.FieldType.Name == "String" then
+        if field.FieldType.FullName == "System.String" then
             -- TODO: fix utf-8 encoding
             file:write(string.format(" = \"%s\";", value))
-        elseif field.FieldType.Namespace == "System" --
-        and field.FieldType.Name == "Char" then
+        elseif field.FieldType.FullName == "System.Char" then
             file:write(string.format(" = '\\x%X';", value))
         else
             file:write(string.format(" = %s;", value))
@@ -303,20 +301,19 @@ local function do_dump_csharp_method(file, type, method, is_ctor)
         file:write(name .. " " .. parameter.Name)
         local status, err = pcall(function()
             if parameter.IsOptional then
+                local type = parameter.ParameterType
                 local value = parameter.DefaultValue
-                if parameter.ParameterType.IsEnum then
+                if type.IsEnum then
                     if value.value__ == nil then
                         file:write(" = 0")
                     else
                         file:write(string.format(" = %d", value.value__))
                     end
                 else
-                    if parameter.ParameterType.Namespace == "System" --
-                    and parameter.ParameterType.Name == "String" then
+                    if type.FullName == "System.String" then
                         -- TODO: fix utf-8 encoding
                         file:write(string.format(" = \"%s\";", value))
-                    elseif parameter.ParameterType.Namespace == "System" --
-                    and parameter.ParameterType.Name == "Char" then
+                    elseif type.FullName == "System.Char" then
                         file:write(string.format(" = '\\x%X';", value))
                     else
                         file:write(string.format(" = %s;", value))
@@ -353,35 +350,45 @@ local function do_dump_csharp_type(file, type)
         file:write(string.format("// Namespace: %s\n", namespace))
     end
 
-    if (type.Attributes & TypeAttributes.Serializable).value__ ~= 0 then
-        file:write("[Serializable]\n")
+    local attributes = type:GetCustomAttributes(true)
+    for i = 0, attributes.Length - 1 do
+        local text = get_runtime_type_name(attributes[i]:GetType())
+        file:write(string.format("[%s]\n", text))
     end
 
     file:write(get_type_string(type) .. get_runtime_type_name(type, false))
-    local once = false
-    local base_type = type.BaseType
-    if base_type ~= nil then
-        local name = get_runtime_type_name_alias(base_type)
-        if base_type.Namespace == "System" then
-            if name ~= "object" and name ~= "ValueType" and name ~= "Enum" then
+    if not type.IsEnum then
+        local once = false
+        local base_type = type.BaseType
+        if base_type ~= nil then
+            local name = get_runtime_type_name_alias(base_type)
+            if name ~= "object" and name ~= "ValueType" then
                 once = true
             end
-        end
-        if once then
-            file:write(" : " .. name)
-        end
-    end
-    local interfaces = type:GetInterfaces()
-    if interfaces.Length > 0 then
-        for i = 0, interfaces.Length - 1 do
-            local interface = interfaces[i]
-            if not once then
-                once = true
-                file:write(" : ")
-            else
-                file:write(", ")
+            if once then
+                file:write(" : " .. name)
             end
-            file:write(get_runtime_type_name_alias(interface))
+        end
+        local interfaces = type:GetInterfaces()
+        if interfaces.Length > 0 then
+            for i = 0, interfaces.Length - 1 do
+                local interface = interfaces[i]
+                local name = get_runtime_type_name_alias(interface)
+                if interface.FullName ~= nil then
+                    local full = interface.FullName
+                    if full:find("System.Runtime.InteropServices.", 1, true) == 1 --
+                    or full:find("System.Reflection.", 1, true) == 1 then
+                        goto continue
+                    end
+                end
+                if not once then
+                    once = true
+                    file:write(" : " .. name)
+                else
+                    file:write(", " .. name)
+                end
+                ::continue::
+            end
         end
     end
 
@@ -397,6 +404,11 @@ local function do_dump_csharp_type(file, type)
                     file:write("\n")
                     file:write("\t// Fields\n")
                     once = true
+                end
+                local attributes = field:GetCustomAttributes(true)
+                for i = 0, attributes.Length - 1 do
+                    local text = get_runtime_type_name(attributes[i]:GetType())
+                    file:write(string.format("\t[%s]\n", text))
                 end
                 file:write("\t")
                 do_dump_csharp_field(file, field)
@@ -415,6 +427,11 @@ local function do_dump_csharp_type(file, type)
                     file:write("\t// Properties\n")
                     once = true
                 end
+                local attributes = property:GetCustomAttributes(true)
+                for i = 0, attributes.Length - 1 do
+                    local text = get_runtime_type_name(attributes[i]:GetType())
+                    file:write(string.format("\t[%s]\n", text))
+                end
                 file:write("\t")
                 do_dump_csharp_property(file, property)
             end
@@ -432,6 +449,11 @@ local function do_dump_csharp_type(file, type)
                     file:write("\t// Constructors\n")
                     once = true
                 end
+                local attributes = constructor:GetCustomAttributes(true)
+                for i = 0, attributes.Length - 1 do
+                    local text = get_runtime_type_name(attributes[i]:GetType())
+                    file:write(string.format("\t[%s]\n", text))
+                end
                 file:write("\t")
                 do_dump_csharp_method(file, type, constructor, true)
             end
@@ -448,6 +470,11 @@ local function do_dump_csharp_type(file, type)
                     file:write("\n")
                     file:write("\t// Methods\n")
                     once = true
+                end
+                local attributes = method:GetCustomAttributes(true)
+                for i = 0, attributes.Length - 1 do
+                    local text = get_runtime_type_name(attributes[i]:GetType())
+                    file:write(string.format("\t[%s]\n", text))
                 end
                 file:write("\t")
                 do_dump_csharp_method(file, type, method, false)

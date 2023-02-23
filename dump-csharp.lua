@@ -294,7 +294,8 @@ local function do_dump_csharp_method(file, type, method, is_ctor)
         else
             if parameter.IsIn then
                 name = "[In] " .. name
-            elseif parameter.IsOut then
+            end
+            if parameter.IsOut then
                 name = "[Out] " .. name
             end
         end

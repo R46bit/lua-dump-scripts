@@ -377,9 +377,14 @@ local function do_dump_csharp_type(file, type)
                 local name = get_runtime_type_name_alias(interface)
                 if interface.FullName ~= nil then
                     local full = interface.FullName
-                    if full:find("System.Runtime.InteropServices.", 1, true) == 1 --
-                    or full:find("System.Reflection.", 1, true) == 1 then
-                        goto continue
+                    if base_type ~= nil then
+                        local base_interfaces = base_type:GetInterfaces()
+                        for i = 0, base_interfaces.Length - 1 do
+                            local base_interface = base_interfaces[i]
+                            if base_interface.FullName == interface.FullName then
+                                goto continue
+                            end
+                        end
                     end
                 end
                 if not once then

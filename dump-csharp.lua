@@ -313,11 +313,11 @@ local function do_dump_csharp_method(file, type, method, is_ctor)
                 else
                     if type.FullName == "System.String" then
                         -- TODO: fix utf-8 encoding
-                        file:write(string.format(" = \"%s\";", value))
+                        file:write(string.format(" = \"%s\"", value))
                     elseif type.FullName == "System.Char" then
-                        file:write(string.format(" = '\\x%X';", value))
+                        file:write(string.format(" = '\\x%X'", value))
                     else
-                        file:write(string.format(" = %s;", value))
+                        file:write(string.format(" = %s", value))
                     end
                 end
             end

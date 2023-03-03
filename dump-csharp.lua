@@ -497,14 +497,14 @@ local function do_dump_csharp()
     local assemblies = CS.System.AppDomain.CurrentDomain:GetAssemblies()
     for i = 0, assemblies.Length - 1 do
         local assembly = assemblies[i]
-        file:write(string.format("// Assembly %d: %s\n", i, assembly:GetSimpleName()))
+        file:write(string.format("// Assembly %d: %s\n", i, assembly:ToString()))
     end
 
     for i = 0, assemblies.Length - 1 do
         local assembly = assemblies[i]
         local types = assembly:GetTypes()
         log:write(string.format("dumping types in assembly %d: %s, total: %d\n", --
-        i, assembly:GetSimpleName(), types.Length))
+        i, assembly:ToString(), types.Length))
         for j = 0, types.Length - 1 do
             local type = types[j]
             file:write("\n")

@@ -213,6 +213,9 @@ local function do_dump_csharp_field(file, field)
         local value = field:GetFieldOffset()
         if value & 0x8000000000000000 ~= 0 then
             value = -value
+        end
+        value = value + 0x10
+        if value < 0 then
             file:write(string.format("; // -0x%X", value))
         else
             file:write(string.format("; // 0x%X", value))
@@ -252,7 +255,7 @@ local function do_dump_csharp_property(file, property)
     file:write("}\n")
 end
 
-local function do_dump_csharp_method(file, type, method, is_ctor)
+local function do_dump_csharp_method(file, type, method, rva, is_ctor)
     if is_ctor then
         file:write(get_method_type_string(method))
         file:write("void " .. method.Name)
@@ -326,7 +329,11 @@ local function do_dump_csharp_method(file, type, method, is_ctor)
             log:write(err .. "\n")
         end
     end
-    file:write(") { }\n")
+    file:write(") { }")
+    if rva ~= nil then
+        file:write(" // RVA: " .. rva)
+    end
+    file:write("\n")
     if not is_ctor then
         local generic_method = method:GetGenericMethodDefinition_impl()
         if generic_method ~= nil then
@@ -342,7 +349,24 @@ CS.System.Reflection.BindingFlags.Static | --
 CS.System.Reflection.BindingFlags.Public | --
 CS.System.Reflection.BindingFlags.NonPublic
 
-local function do_dump_csharp_type(file, type)
+local function split(inputstr, sep)
+    if sep == nil then
+        sep = "%s"
+    end
+    local t={}
+    for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
+        table.insert(t, str)
+    end
+    return t
+end
+
+local function get_rvas(index)
+    return {}
+    -- return split(CS.MiHoYo.SDK.SDKUtil.RSAEncrypt("get_rva", string.format("%d", index)), ";")
+end
+
+local function do_dump_csharp_type(file, type, index)
+    file:write(string.format("// TypeDefIndex: %d\n", index))
     file:write(string.format("// Module: %s\n", type.Module.name))
     local namespace = type.Namespace
     if namespace == nil then
@@ -350,6 +374,8 @@ local function do_dump_csharp_type(file, type)
     else
         file:write(string.format("// Namespace: %s\n", namespace))
     end
+    local rvas = get_rvas(index)
+    local index = 1
 
     local attributes = type:GetCustomAttributes(true)
     for i = 0, attributes.Length - 1 do
@@ -461,7 +487,8 @@ local function do_dump_csharp_type(file, type)
                     file:write(string.format("\t[%s]\n", text))
                 end
                 file:write("\t")
-                do_dump_csharp_method(file, type, constructor, true)
+                do_dump_csharp_method(file, type, constructor, rvas[index], true)
+                index = index + 1
             end
         end
     end
@@ -483,7 +510,8 @@ local function do_dump_csharp_type(file, type)
                     file:write(string.format("\t[%s]\n", text))
                 end
                 file:write("\t")
-                do_dump_csharp_method(file, type, method, false)
+                do_dump_csharp_method(file, type, method, rvas[index], false)
+                index = index + 1
             end
         end
     end
@@ -500,6 +528,8 @@ local function do_dump_csharp()
         file:write(string.format("// Assembly %d: %s\n", i, assembly:ToString()))
     end
 
+    local index = 0
+
     for i = 0, assemblies.Length - 1 do
         local assembly = assemblies[i]
         local types = assembly:GetTypes()
@@ -508,8 +538,22 @@ local function do_dump_csharp()
         for j = 0, types.Length - 1 do
             local type = types[j]
             file:write("\n")
-            do_dump_csharp_type(file, type)
+            if j == 0 then
+                file:write(string.format("// TypeDefIndex: %d\n", index))
+                file:write(string.format("// Module: %s\n", type.Module.name))
+                local namespace = type.Namespace
+                if namespace == nil then
+                    file:write("// Namespace:\n")
+                else
+                    file:write(string.format("// Namespace: %s\n", namespace))
+                end
+                file:write("internal class <Module>\n{}\n\n")
+                index = index + 1
+            end
+            do_dump_csharp_type(file, type, index)
+            index = index + 1
         end
+        break
     end
 
     file:close()

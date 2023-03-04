@@ -553,7 +553,6 @@ local function do_dump_csharp()
             do_dump_csharp_type(file, type, index)
             index = index + 1
         end
-        break
     end
 
     file:close()

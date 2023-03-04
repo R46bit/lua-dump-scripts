@@ -349,23 +349,7 @@ CS.System.Reflection.BindingFlags.Static | --
 CS.System.Reflection.BindingFlags.Public | --
 CS.System.Reflection.BindingFlags.NonPublic
 
-local function split(inputstr, sep)
-    if sep == nil then
-        sep = "%s"
-    end
-    local t={}
-    for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
-        table.insert(t, str)
-    end
-    return t
-end
-
-local function get_rvas(index)
-    return {}
-    -- return split(CS.MiHoYo.SDK.SDKUtil.RSAEncrypt("get_rva", string.format("%d", index)), ";")
-end
-
-local function do_dump_csharp_type(file, type, index)
+local function do_dump_csharp_type(file, type, index, rvas)
     file:write(string.format("// TypeDefIndex: %d\n", index))
     file:write(string.format("// Module: %s\n", type.Module.name))
     local namespace = type.Namespace
@@ -374,8 +358,7 @@ local function do_dump_csharp_type(file, type, index)
     else
         file:write(string.format("// Namespace: %s\n", namespace))
     end
-    local rvas = get_rvas(index)
-    local index = 1
+    local index = 2
 
     local attributes = type:GetCustomAttributes(true)
     for i = 0, attributes.Length - 1 do
@@ -519,6 +502,22 @@ local function do_dump_csharp_type(file, type, index)
     file:write("}\n")
 end
 
+local function split(inputstr, sep)
+    if sep == nil then
+        sep = "%s"
+    end
+    local t={}
+    for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
+        table.insert(t, str)
+    end
+    return t
+end
+
+local function get_rvas(index)
+    return {}
+    -- return split(CS.MiHoYo.SDK.SDKUtil.RSAEncrypt("get_rva", string.format("%d", index)), ";")
+end
+
 local function do_dump_csharp()
     local file = io.open(DUMP_CS_FILE, "w")
 
@@ -538,7 +537,12 @@ local function do_dump_csharp()
         for j = 0, types.Length - 1 do
             local type = types[j]
             file:write("\n")
-            if j == 0 then
+            local rvas = {}
+            while true do
+                rvas = get_rvas(index)
+                if rvas[1] ~= "<Module>" then
+                    break
+                end
                 file:write(string.format("// TypeDefIndex: %d\n", index))
                 file:write(string.format("// Module: %s\n", type.Module.name))
                 local namespace = type.Namespace
@@ -550,7 +554,7 @@ local function do_dump_csharp()
                 file:write("internal class <Module>\n{}\n\n")
                 index = index + 1
             end
-            do_dump_csharp_type(file, type, index)
+            do_dump_csharp_type(file, type, index, rvas)
             index = index + 1
         end
     end

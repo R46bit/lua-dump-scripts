@@ -4,6 +4,22 @@ local DUMP_CS_FILE = DUMP_FOLDER .. "/dump-csharp.cs"
 
 local log = io.open(DUMP_LOG_FILE, "w")
 
+local function split(inputstr, sep)
+    if sep == nil then
+        sep = "%s"
+    end
+    local t={}
+    for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
+        table.insert(t, str)
+    end
+    return t
+end
+
+local get_rvas = nil
+-- local get_rvas = function(index)
+--     return split(CS.MiHoYo.SDK.SDKUtil.RSAEncrypt("get_rva", string.format("%d", index)), ";")
+-- end
+
 local SYSTEM_NAMES = {
     ["System.Int32"] = "int",
     ["System.UInt32"] = "uint",
@@ -350,13 +366,18 @@ CS.System.Reflection.BindingFlags.Public | --
 CS.System.Reflection.BindingFlags.NonPublic
 
 local function do_dump_csharp_type(file, type, index, rvas)
-    file:write(string.format("// TypeDefIndex: %d\n", index))
+    if get_rvas ~= nil then
+        file:write(string.format("// TypeDefIndex: %d\n", index))
+    end
     file:write(string.format("// Module: %s\n", type.Module.name))
     local namespace = type.Namespace
     if namespace == nil then
         file:write("// Namespace:\n")
     else
         file:write(string.format("// Namespace: %s\n", namespace))
+    end
+    if rvas[1] ~= nil then
+        file:write("// " .. rvas[1] .. "\n")
     end
     local index = 2
 
@@ -502,22 +523,6 @@ local function do_dump_csharp_type(file, type, index, rvas)
     file:write("}\n")
 end
 
-local function split(inputstr, sep)
-    if sep == nil then
-        sep = "%s"
-    end
-    local t={}
-    for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
-        table.insert(t, str)
-    end
-    return t
-end
-
-local function get_rvas(index)
-    return {}
-    -- return split(CS.MiHoYo.SDK.SDKUtil.RSAEncrypt("get_rva", string.format("%d", index)), ";")
-end
-
 local function do_dump_csharp()
     local file = io.open(DUMP_CS_FILE, "w")
 
@@ -539,8 +544,11 @@ local function do_dump_csharp()
             file:write("\n")
             local rvas = {}
             while true do
+                if get_rvas == nil then
+                    break
+                end
                 rvas = get_rvas(index)
-                if rvas[1] ~= "<Module>" then
+                if rvas[1] ~= "<nil>" and rvas[1] ~= "<Module>" then
                     break
                 end
                 file:write(string.format("// TypeDefIndex: %d\n", index))
@@ -551,7 +559,12 @@ local function do_dump_csharp()
                 else
                     file:write(string.format("// Namespace: %s\n", namespace))
                 end
-                file:write("internal class <Module>\n{}\n\n")
+                if rvas[1] == "<Module>" then
+                    file:write("internal class <Module>\n{}\n")
+                else
+                    file:write("// " .. table.concat(rvas, ";") .. "\n")
+                end
+                file:write("\n")
                 index = index + 1
             end
             do_dump_csharp_type(file, type, index, rvas)
